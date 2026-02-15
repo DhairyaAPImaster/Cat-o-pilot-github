@@ -1,0 +1,721 @@
+import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as https from 'https';
+import * as dotenv from 'dotenv';
+
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
+
+let explainerPanel: vscode.WebviewView | undefined;
+
+export async function activate(ctx: vscode.ExtensionContext) {
+  const promptForApiKey = async (reason?: string) => {
+    const message = reason ? reason : 'Please enter your Gemini API key:';
+    const key = await vscode.window.showInputBox({
+      prompt: message,
+      password: true,
+      placeHolder: 'AIza...'
+    });
+    if (key) {
+      await ctx.globalState.update('geminiApiKey', key);
+      vscode.window.showInformationMessage('Gemini API key has been set!');
+    }
+    return key;
+  };
+
+  let apiKey = ctx.globalState.get<string>('geminiApiKey');
+
+  if (!apiKey) {
+    apiKey = await promptForApiKey();
+    if (!apiKey) {
+      return;
+    }
+  } else {
+    const config = vscode.workspace.getConfiguration('catcode');
+    const promptOnActivate = config.get<boolean>('promptForApiKeyOnActivate', true);
+
+    if (promptOnActivate) {
+      const action = await vscode.window.showInformationMessage(
+        'Gemini API Key already saved. Do you want to re-enter it?',
+        'Re-enter',
+        'Keep'
+      );
+
+      if (action === 'Re-enter') {
+        await promptForApiKey();
+      }
+    }
+  }
+
+  const explainerProvider = new CatExplainerProvider(ctx);
+
+  ctx.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      'catcodeExplainer',
+      explainerProvider,
+      { webviewOptions: { retainContextWhenHidden: true } }
+    )
+  );
+
+  ctx.subscriptions.push(
+    vscode.commands.registerCommand('catcode.resetApiKey', async () => {
+      await promptForApiKey('API key reset');
+    })
+  );
+}
+
+export function deactivate() {}
+
+class CatExplainerProvider implements vscode.WebviewViewProvider {
+  private conversationHistory: Array<any> = [];
+
+  constructor(private ctx: vscode.ExtensionContext) {}
+
+  resolveWebviewView(
+    webviewView: vscode.WebviewView,
+    ctx: vscode.WebviewViewResolveContext,
+    token: vscode.CancellationToken
+  ) {
+    explainerPanel = webviewView;
+
+    webviewView.webview.options = {
+      enableScripts: true,
+      localResourceRoots: [this.ctx.extensionUri]
+    };
+
+    webviewView.webview.html = this.getHtmlContent(webviewView.webview);
+
+    webviewView.webview.onDidReceiveMessage(async (msg: any) => {
+      if (msg.command === 'explain') {
+        try {
+          webviewView.webview.postMessage({
+            command: 'loading',
+            isLoading: true
+          });
+
+          const explanation = await this.generateExplanation(
+            msg.query, 
+            msg.selectedText, 
+            msg.fileName,
+            msg.uploadedFiles
+          );
+          
+          webviewView.webview.postMessage({
+            command: 'response',
+            text: explanation,
+            isLoading: false
+          });
+        } catch (error: any) {
+          webviewView.webview.postMessage({
+            command: 'error',
+            text: `Meow! 😿 Error: ${error.message}`,
+            isLoading: false
+          });
+        }
+      } else if (msg.command === 'clearHistory') {
+        this.conversationHistory = [];
+        webviewView.webview.postMessage({
+          command: 'historyCleared'
+        });
+      }
+    });
+  }
+
+  private async generateExplanation(
+    query: string,
+    selectedText: string | null,
+    fileName: string | null,
+    uploadedFiles: Array<{ name: string; content: string }> | null
+  ): Promise<string> {
+    const provider = this.ctx.globalState.get<string>('aiProvider');
+    
+    let apiKey: string | undefined;
+    if (provider === 'openai') {
+      apiKey = this.ctx.globalState.get<string>('openaiApiKey');
+    } else if (provider === 'perplexity') {
+      apiKey = this.ctx.globalState.get<string>('perplexityApiKey');
+    } else if (provider === 'mistral') {
+      apiKey = this.ctx.globalState.get<string>('mistralApiKey');
+    } else if (provider === 'hackclub') {
+      apiKey = this.ctx.globalState.get<string>('hackclubApiKey') || 'HACKCLUB_STANDARD';
+    } else {
+      apiKey = this.ctx.globalState.get<string>('geminiApiKey');
+    }
+    
+    if (!apiKey) {
+      throw new Error('API Key not found. Please restart VS Code to set it up.');
+    }
+
+    const allFiles = await this.readWorkspace();
+    let contextText = this.buildContext(allFiles, selectedText, fileName, uploadedFiles);
+
+    if (provider === 'openai' || provider === 'perplexity' || provider === 'mistral' || provider === 'hackclub') {
+      const userMessage = {
+        role: 'user',
+        content: `${contextText}\n\nUser Question: ${query}`
+      };
+      const messages = [...this.conversationHistory, userMessage];
+
+      let response: string;
+      if (provider === 'openai') {
+        response = await this.callOpenAIAPI(apiKey, messages);
+      } else if (provider === 'mistral') {
+        response = await this.callMistralAPI(apiKey, messages);
+      } else if (provider === 'hackclub') {
+        response = await this.callHackclubAPI(apiKey, messages);
+      } else {
+        response = await this.callPerplexityAPI(apiKey, messages);
+      }
+
+      this.conversationHistory.push(userMessage);
+      this.conversationHistory.push({
+        role: 'assistant',
+        content: response
+      });
+
+      return response;
+    } else {
+      this.conversationHistory.push({
+        role: 'user',
+        parts: [{ text: `${contextText}\n\nUser Question: ${query}` }]
+      });
+
+      const response = await this.callGeminiAPI(apiKey, this.conversationHistory);
+
+      this.conversationHistory.push({
+        role: 'model',
+        parts: [{ text: response }]
+      });
+
+      return response;
+    }
+  }
+
+  private async callGeminiAPI(
+    apiKey: string, 
+    messages: Array<{ role: string; parts: Array<{ text: string }> }>
+  ): Promise<string> {
+    const body = {
+      contents: messages,
+      generationConfig: {
+        temperature: 0.7,
+        maxOutputTokens: 2048,
+      },
+      safetySettings: [
+        {
+          category: 'HARM_CATEGORY_HARASSMENT',
+          threshold: 'BLOCK_NONE'
+        },
+        {
+          category: 'HARM_CATEGORY_HATE_SPEECH',
+          threshold: 'BLOCK_NONE'
+        },
+        {
+          category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
+          threshold: 'BLOCK_NONE'
+        },
+        {
+          category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
+          threshold: 'BLOCK_NONE'
+        }
+      ]
+    };
+
+    const postData = JSON.stringify(body);
+
+    const geminiModel = this.ctx.globalState.get<string>('geminiModel', 'gemini-1.5-flash');
+
+    return new Promise((resolve, reject) => {
+      const options = {
+        hostname: 'generativelanguage.googleapis.com',
+        path: `/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(postData)
+        }
+      };
+
+      const req = https.request(options, (res) => {
+        let data = '';
+
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+
+        res.on('end', () => {
+          try {
+            if (res.statusCode !== 200) {
+              reject(new Error(`Gemini API error: ${res.statusCode} - ${data}`));
+              return;
+            }
+
+            const jsonData = JSON.parse(data);
+            
+            if (jsonData.candidates && jsonData.candidates[0] && jsonData.candidates[0].content) {
+              resolve(jsonData.candidates[0].content.parts[0].text + '\n\nmeow 🐱');
+            } else {
+              reject(new Error('No response from Gemini API'));
+            }
+          } catch (error: any) {
+            reject(new Error(`Failed to parse Gemini API response: ${error.message}`));
+          }
+        });
+      });
+
+      req.on('error', (error) => {
+        reject(new Error(`Failed to call Gemini API: ${error.message}`));
+      });
+
+      req.write(postData);
+      req.end();
+    });
+  }
+
+  private async callOpenAIAPI(
+    apiKey: string, 
+    messages: Array<{ role: string; content: string }>
+  ): Promise<string> {
+    const openaiModel = this.ctx.globalState.get<string>('openaiModel', 'gpt-4-turbo');
+
+    const body = {
+      model: openaiModel,
+      messages: messages.map(msg => ({
+        role: msg.role,
+        content: msg.content
+      })),
+      temperature: 0.7,
+      max_tokens: 2048
+    };
+
+    const postData = JSON.stringify(body);
+
+    return new Promise((resolve, reject) => {
+      const options = {
+        hostname: 'api.openai.com',
+        path: '/v1/chat/completions',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Length': Buffer.byteLength(postData)
+        }
+      };
+
+      const req = https.request(options, (res) => {
+        let data = '';
+
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+
+        res.on('end', () => {
+          try {
+            if (res.statusCode !== 200) {
+              reject(new Error(`OpenAI API error: ${res.statusCode} - ${data}`));
+              return;
+            }
+
+            const jsonData = JSON.parse(data);
+            
+            if (jsonData.choices && jsonData.choices[0] && jsonData.choices[0].message) {
+              resolve(jsonData.choices[0].message.content + '\n\nmeow 🐱');
+            } else {
+              reject(new Error('No response from OpenAI API'));
+            }
+          } catch (error: any) {
+            reject(new Error(`Failed to parse OpenAI API response: ${error.message}`));
+          }
+        });
+      });
+
+      req.on('error', (error) => {
+        reject(new Error(`Failed to call OpenAI API: ${error.message}`));
+      });
+
+      req.write(postData);
+      req.end();
+    });
+  }
+
+  private async callPerplexityAPI(
+    apiKey: string, 
+    messages: Array<{ role: string; content: string }>
+  ): Promise<string> {
+    if (!apiKey || apiKey.trim().length === 0) {
+      throw new Error('Perplexity API Key is empty. Please check your settings.');
+    }
+
+    const perplexityModel = this.ctx.globalState.get<string>('perplexityModel', 'sonar-pro');
+
+    const body = {
+      model: perplexityModel,
+      messages: messages.map(msg => ({
+        role: msg.role,
+        content: msg.content
+      })),
+      temperature: 0.7,
+      max_tokens: 2048
+    };
+
+    const postData = JSON.stringify(body);
+
+    return new Promise((resolve, reject) => {
+      const options = {
+        hostname: 'api.perplexity.ai',
+        path: '/chat/completions',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Length': Buffer.byteLength(postData)
+        }
+      };
+
+      const req = https.request(options, (res) => {
+        let data = '';
+
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+
+        res.on('end', () => {
+          try {
+            if (res.statusCode === 401) {
+              reject(new Error(`Perplexity API error 401: Invalid or expired API key. Please reset your key via Command Palette > "CatCode: Reset API Key"`));
+              return;
+            }
+
+            if (res.statusCode !== 200) {
+              reject(new Error(`Perplexity API error: ${res.statusCode} - ${data}`));
+              return;
+            }
+
+            const jsonData = JSON.parse(data);
+            
+            if (jsonData.choices && jsonData.choices[0] && jsonData.choices[0].message) {
+              resolve(jsonData.choices[0].message.content + '\n\nmeow 🐱');
+            } else {
+              reject(new Error('No response from Perplexity API'));
+            }
+          } catch (error: any) {
+            reject(new Error(`Failed to parse Perplexity API response: ${error.message}`));
+          }
+        });
+      });
+
+      req.on('error', (error) => {
+        reject(new Error(`Failed to call Perplexity API: ${error.message}`));
+      });
+
+      req.write(postData);
+      req.end();
+    });
+  }
+
+  private async callMistralAPI(
+    apiKey: string, 
+    messages: Array<{ role: string; content: string }>
+  ): Promise<string> {
+    if (!apiKey || apiKey.trim().length === 0) {
+      throw new Error('Mistral API Key is empty. Please check your settings.');
+    }
+
+    const mistralModel = this.ctx.globalState.get<string>('mistralModel', 'mistral-large-latest');
+
+    const body = {
+      model: mistralModel,
+      messages: messages.map(msg => ({
+        role: msg.role,
+        content: msg.content
+      })),
+      temperature: 0.7,
+      max_tokens: 2048
+    };
+
+    const postData = JSON.stringify(body);
+
+    return new Promise((resolve, reject) => {
+      const options = {
+        hostname: 'api.mistral.ai',
+        path: '/v1/chat/completions',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Length': Buffer.byteLength(postData)
+        }
+      };
+
+      const req = https.request(options, (res) => {
+        let data = '';
+
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+
+        res.on('end', () => {
+          try {
+            if (res.statusCode === 401) {
+              reject(new Error(`Mistral API error 401: Invalid or expired API key. Please reset your key via Command Palette > "CatCode: Reset API Key"`));
+              return;
+            }
+
+            if (res.statusCode !== 200) {
+              reject(new Error(`Mistral API error: ${res.statusCode} - ${data}`));
+              return;
+            }
+
+            const jsonData = JSON.parse(data);
+            
+            if (jsonData.choices && jsonData.choices[0] && jsonData.choices[0].message) {
+              resolve(jsonData.choices[0].message.content + '\n\nmeow 🐱');
+            } else {
+              reject(new Error('No response from Mistral API'));
+            }
+          } catch (error: any) {
+            reject(new Error(`Failed to parse Mistral API response: ${error.message}`));
+          }
+        });
+      });
+
+      req.on('error', (error) => {
+        reject(new Error(`Failed to call Mistral API: ${error.message}`));
+      });
+
+      req.write(postData);
+      req.end();
+    });
+  }
+
+  private async callHackclubAPI(
+    apiKey: string, 
+    messages: Array<{ role: string; content: string }>
+  ): Promise<string> {
+    const hackclubApiKey = process.env.HACKCLUB_API_KEY;
+    if (!hackclubApiKey) {
+      throw new Error('HACKCLUB_API_KEY not found in .env file. Please set it up.');
+    }
+
+    const hackclubModel = this.ctx.globalState.get<string>('hackclubModel', 'google/gemini-3-flash-preview');
+
+    const body = {
+      model: hackclubModel,
+      messages: messages.map(msg => ({
+        role: msg.role,
+        content: msg.content
+      })),
+      temperature: 0.7,
+      max_tokens: 2048
+    };
+
+    const postData = JSON.stringify(body);
+
+    return new Promise((resolve, reject) => {
+      const options = {
+        hostname: 'ai.hackclub.com',
+        path: '/proxy/v1/chat/completions',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${hackclubApiKey}`,
+          'Content-Length': Buffer.byteLength(postData)
+        }
+      };
+
+      const req = https.request(options, (res) => {
+        let data = '';
+
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+
+        res.on('end', () => {
+          try {
+            if (res.statusCode === 401) {
+              reject(new Error(`Hackclub API error 401: Invalid or expired API key. Check your .env file.`));
+              return;
+            }
+
+            if (res.statusCode !== 200) {
+              reject(new Error(`Hackclub API error: ${res.statusCode} - ${data}`));
+              return;
+            }
+
+            const jsonData = JSON.parse(data);
+            
+            if (jsonData.choices && jsonData.choices[0] && jsonData.choices[0].message) {
+              resolve(jsonData.choices[0].message.content + '\n\nmeow 🐱');
+            } else {
+              reject(new Error('No response from Hackclub API'));
+            }
+          } catch (error: any) {
+            reject(new Error(`Failed to parse Hackclub API response: ${error.message}`));
+          }
+        });
+      });
+
+      req.on('error', (error) => {
+        reject(new Error(`Failed to call Hackclub API: ${error.message}`));
+      });
+
+      req.write(postData);
+      req.end();
+    });
+  }
+
+  private buildContext(
+    files: Map<string, string>, 
+    selected: string | null, 
+    file: string | null,
+    uploadedFiles: Array<{ name: string; content: string }> | null
+  ): string {
+    let context = 'You are a helpful cat coding assistant. Explain code in a friendly, clear way and always end with "meow 🐱".\n\n';
+    
+    context += '=== WORKSPACE FILES ===\n';
+    for (const [path, content] of files) {
+      context += `FILE: ${path}\n${content.substring(0, 500)}...\n\n`;
+    }
+    
+    if (selected) {
+      context += `\n=== SELECTED CODE ===\n${selected}\n\n`;
+    }
+    
+    if (file) {
+      context += `\n=== CURRENT FILE ===\n${file}\n\n`;
+    }
+
+    if (uploadedFiles && uploadedFiles.length > 0) {
+      context += '\n=== UPLOADED REFERENCE FILES ===\n';
+      for (const uf of uploadedFiles) {
+        context += `FILE: ${uf.name}\n${uf.content}\n\n`;
+      }
+    }
+    
+    return context;
+  }
+
+  private async readWorkspace(): Promise<Map<string, string>> {
+    const stuff = new Map<string, string>();
+    const folders = vscode.workspace.workspaceFolders;
+
+    if (!folders) return stuff;
+
+    const ignore = ['node_modules', '.git', 'dist', 'build', '.vscode', 'out'];
+
+    const scan = async (dir: string, depth: number) => {
+      if (depth > 10) return;
+
+      const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(dir));
+
+      for (const [name, type] of entries) {
+        if (ignore.some(x => name.includes(x))) continue;
+
+        const fullPath = path.join(dir, name);
+        const relPath = path.relative(folders[0].uri.fsPath, fullPath);
+
+        if (type === vscode.FileType.File) {
+          try {
+            const content = fs.readFileSync(fullPath, 'utf-8');
+            if (content.length < 50000) {
+              stuff.set(relPath, content);
+            }
+          } catch {}
+        } else if (type === vscode.FileType.Directory) {
+          await scan(fullPath, depth + 1);
+        }
+      }
+    };
+
+    await scan(folders[0].uri.fsPath, 0);
+    return stuff;
+  }
+
+  private getHtmlContent(webview: vscode.Webview): string {
+    const scriptUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.ctx.extensionUri, 'sidebar', 'main.js')
+    );
+
+    const styleUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.ctx.extensionUri, 'sidebar', 'style.css')
+    );
+
+    const thinkingCatUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.ctx.extensionUri, 'cat-images', 'thinking.png')
+    );
+
+    const loadingCatUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.ctx.extensionUri, 'cat-images', 'loading cat.png')
+    );
+
+    const errorCatUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.ctx.extensionUri, 'cat-images', 'error cat.png')
+    );
+
+    const finalResponseCatUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.ctx.extensionUri, 'cat-images', 'final response provided.png')
+    );
+
+    const meowUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.ctx.extensionUri, 'cat-sounds', 'meow.mp3')
+    );
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CatCode Explainer</title>
+  <link rel="stylesheet" href="${styleUri}">
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <img id="cat-icon" src="${thinkingCatUri}" alt="cat" class="cat-icon" />
+      <h1>CatCode Explainer</h1>
+    </div>
+
+    <div class="controls">
+      <label class="meow-toggle">
+        <input type="checkbox" id="meow-toggle-checkbox" checked />
+        <span>🔊 Play meow sound after each response</span>
+      </label>
+    </div>
+
+    <div class="chat-container">
+      <div id="chat" class="chat"></div>
+    </div>
+
+    <div class="file-upload-area">
+      <input type="file" id="file-upload" multiple accept=".txt,.md,.js,.ts,.py,.java,.cpp,.c,.cs,.html,.css,.json" style="display: none;" />
+      <button id="upload-btn" class="upload-btn" title="Upload reference files">📎 Upload Files</button>
+      <div id="uploaded-files" class="uploaded-files"></div>
+    </div>
+
+    <div class="input-area">
+      <textarea
+        id="query"
+        placeholder="Ask the cat about your code..."
+        class="input"
+        rows="2"
+      ></textarea>
+      <div class="button-group">
+        <button id="clear-btn" class="clear-btn" title="Clear conversation">🗑️</button>
+        <button id="send" class="send-btn">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <audio id="meow-sound" src="${meowUri}"></audio>
+
+  <script>
+    const thinkingCat = '${thinkingCatUri}';
+    const loadingCat = '${loadingCatUri}';
+    const errorCat = '${errorCatUri}';
+    const finalCat = '${finalResponseCatUri}';
+  </script>
+  <script src="${scriptUri}"></script>
+</body>
+</html>`;
+  }
+}

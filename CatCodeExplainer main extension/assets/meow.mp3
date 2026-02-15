@@ -1,0 +1,11 @@
+This is a placeholder for the meow.mp3 file.
+In a real implementation, you would replace this with an actual MP3 audio file.
+The file should be a short cat meow sound (1-2 seconds).
+
+To add a real meow sound:
+1. Find a free cat meow sound online (e.g., from freesound.org, zapsplat.com)
+2. Convert it to MP3 format
+3. Replace this file with the actual audio file
+4. Keep it under 500KB for performance
+
+The webview will automatically play this sound when a cat response is displayed.

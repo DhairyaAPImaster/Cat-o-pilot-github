@@ -1,0 +1,99 @@
+{
+  "name": "catcode-explainer",
+  "displayName": "CatCode Explainer",
+  "description": "Friendly cats explain what your code does using Gemini AI or Hackclub AI",
+  "version": "1.0.4",
+  "publisher": "catcode",
+
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Education",
+    "Visualization",
+    "AI"
+  ],
+
+  "activationEvents": [
+    "onView:catcodeExplainer",
+    "onCommand:catcode.resetApiKey",
+    "onCommand:catcode.enterApiKey",
+    "onCommand:catcode.selectProvider",
+    "onCommand:catcode.playWelcomeVideo"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "catcode-explainer-container",
+          "title": "CatCode Explainer",
+          "icon": "assets/cat-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "catcode-explainer-container": [
+        {
+          "type": "webview",
+          "id": "catcodeExplainer",
+          "name": "Code Explainer"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "catcode.resetApiKey",
+        "title": "CatCode: Reset API Key"
+      },
+      {
+        "command": "catcode.enterApiKey",
+        "title": "CatCode: Enter API Key"
+      },
+      {
+        "command": "catcode.selectProvider",
+        "title": "CatCode: Select AI Provider"
+      },
+      {
+        "command": "catcode.playWelcomeVideo",
+        "title": "CatCode: Play Welcome Video"
+      }
+    ],
+    "configuration": {
+      "title": "CatCode Explainer",
+      "properties": {
+        "catcode.geminiModel": {
+          "type": "string",
+          "default": "gemini-1.5-flash",
+          "description": "Gemini model to use (e.g., gemini-1.5-flash, gemini-1.5-pro, gemini-2.0-flash-exp)",
+          "order": 1
+        },
+        "catcode.promptForApiKeyOnActivate": {
+          "type": "boolean",
+          "default": true,
+          "description": "Prompt to re-enter the Gemini API key on activation.",
+          "order": 2
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^2.26.0",
+    "@types/vscode": "^1.80.0",
+    "@types/node": "16.x",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "node-fetch": "^2.6.1"
+  }
+}
+
