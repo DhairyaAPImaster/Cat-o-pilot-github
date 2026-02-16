@@ -1,22 +1,36 @@
-# Cat-o-pilot github
-So we all know that feeling that we basically see a project that we like on github and then we like download the code and try and make some changes to it but like odnt know what to do as the code is extremelly messy and has no comments or like is just a little complicated.
+# Cat-o-pilot
 
-# INTRODUCING CAT-O-PILOT!!!!
-That is why i created Cat-o-Pilot 
-It is an extension for vs code and explains the code that is complicated or the code that is just messy. 
-but where is the fun in that well here is the fun - It explains the code by cats...... YES CATS!!!
-Also it has real random meow sounds that play after responses and have custom cat images that i found on the web.
+We all know that feeling: you find a project you like on GitHub, download the code, and want to make changes—but then you realize the code is extremely messy, has zero comments, or is just plain complicated.
 
-# How to run 
-1- Go to the cat-o-pilot website - https://cat-o-pilot-website.vercel.app/
-2- Click the get it button
-3- Download the most powerfull model - version 1.0.3 
-4- Open VS code 
-5- Go to the extensions tab
-6- Click the three dots on the top of the extensions tab in vs code
-7- Select "install from vsix"
-8- Select the vsix file that had been downloaded from the website
-9- Follow the popup instructions 
-10- Select the hackclub ai for your ai provider as that does not require you to provide an api key and is completely free
-11- DONE IT IS SETUP AND YOU ARE READY TO GO AHEAD AND ASK IT QUESTIONS ABOUT THE CODE!!!
+---
 
+##  INTRODUCING CAT-O-PILOT!
+
+That is why I created **Cat-o-Pilot**. It is an extension for VS Code that explains code that is complicated or just plain messy. 
+
+But where is the fun in a standard explainer? Here is the twist: **It explains the code using cats.** YES, CATS!
+
+### Key Features
+* **Feline Logic:** Understand complex code through cat-themed explanations.
+* **Audio Feedback:** Real random "meow" sounds play after every response.
+* **Visual Flair:** Includes custom cat images curated from across the web.
+
+---
+
+##  How to Run
+
+Follow these steps to get Cat-o-pilot up and running in your editor:
+
+1.  **Visit the Website:** Go to the [Cat-o-pilot website](https://cat-o-pilot-website.vercel.app/).
+2.  **Get the Extension:** Click the **"Get It"** button.
+3.  **Download:** Download the most powerful model (**Version 1.0.3**).
+4.  **Open VS Code:** Launch your editor.
+5.  **Extensions Tab:** Go to the Extensions tab (`Ctrl+Shift+X`).
+6.  **Menu:** Click the **three dots (...)** at the top of the Extensions side bar.
+7.  **Install VSIX:** Select **"Install from VSIX..."**
+8.  **Select File:** Choose the `.vsix` file you downloaded from the website.
+9.  **Follow Instructions:** Follow the popup instructions within the editor.
+10. **Set AI Provider:** Select **Hack Club AI** as your provider—it requires no API key and is completely free!
+11. **Done!** You are set up and ready to start asking questions about your code!
+
+---
