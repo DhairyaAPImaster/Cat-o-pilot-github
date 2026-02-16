@@ -1,6 +1,6 @@
 # Cat-o-pilot
 
-We all know that feeling: you find a project you like on GitHub, download the code, and want to make changes—but then you realize the code is extremely messy, has zero comments, or is just plain complicated.
+We all know that feeling: you find a project you like on GitHub, download the code, and want to make changes but then you realize the code is extremely messy, has zero comments, or is just plain complicated.
 
 ---
 
@@ -30,7 +30,7 @@ Follow these steps to get Cat-o-pilot up and running in your editor:
 7.  **Install VSIX:** Select **"Install from VSIX..."**
 8.  **Select File:** Choose the `.vsix` file you downloaded from the website.
 9.  **Follow Instructions:** Follow the popup instructions within the editor.
-10. **Set AI Provider:** Select **Hack Club AI** as your provider—it requires no API key and is completely free!
+10. **Set AI Provider:** Select **Hack Club AI** as your provider it requires no API key and is completely free!
 11. **Done!** You are set up and ready to start asking questions about your code!
 
 ---
