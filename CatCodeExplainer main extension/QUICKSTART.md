@@ -1,16 +1,5 @@
 # 🐱 CatCode Explainer - Quick Start guide
 
-## What's Fixed? ✅
-
-1. **Gemini AI Integration** - Now uses real Gemini API for accurate answers (no more generic responses!)
-2. **API Key Prompt** - Asks for your Gemini API key when you first install (yep, the first time)
-3. **Cat Images Working** - All cat images now display correctly in the sidebar
-4. **File Upload** - You can now upload reference files to help answer questions
-5. **Continuous Conversation** - Maintains conversation history for follow-up questions
-6. **Multiple Responses** - No longer limited to one response - ask as many questions as you want!
-
-## How to Test
-
 ### Step 1: Run the Extension
 ```powershell
 # In VS Code, press F5 to start debugging
