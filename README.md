@@ -7,7 +7,7 @@ It is an extension for vs code and explains the code that is complicated or the 
 but where is the fun in that well here is the fun - It explains the code by cats...... YES CATS!!!
 Also it has real random meow sounds that play after responses and have custom cat images that i found on the web.
 
-#How to run 
+# How to run 
 1- Go to the cat-o-pilot website - https://cat-o-pilot-website.vercel.app/
 2- Click the get it button
 3- Download the most powerfull model - version 1.0.3 
