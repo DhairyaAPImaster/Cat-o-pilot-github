@@ -1,5 +1,5 @@
 # Very important note- 
-Hackclub ai is available only for the versions 1.0.2 and version 1.0.3 also if the popup to change the ai provider (hackclub or gemini) does not popup on its own after installlation then press ctrl+shift+p in vs code and type in catcode out of all the commands select the command - Reset API key - then just choose the provider to be hackclub ai and you are all done.
+***Hackclub ai is available only for the versions 1.0.2 and version 1.0.3 also if the popup to change the ai provider (hackclub or gemini) does not popup on its own after installlation then press ctrl+shift+p in vs code and type in catcode out of all the commands select the command - Reset API key - then just choose the provider to be hackclub ai and you are all done.***
 # Cat-o-pilot
 
 We all know that feeling: you find a project you like on GitHub, download the code, and want to make changes but then you realize the code is extremely messy, has zero comments, or is just plain complicated.
